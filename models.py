@@ -18,7 +18,7 @@ class Employee(Base):
     
     # En base de datos se guarda como texto plano: "[0.12, -0.5, ...]"
     face_vector_json = Column(String, default="[]")
-    
+    photo_path = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at_utc = Column(DateTime, default=datetime.utcnow)
 

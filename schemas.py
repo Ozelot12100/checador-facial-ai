@@ -15,6 +15,7 @@ class EmployeeResponse(EmployeeBase):
     id: str
     is_active: bool
     created_at_utc: datetime
+    photo_path: Optional[str] = None
 
     class Config:
         from_attributes = True # Permite leer datos desde los modelos de SQLAlchemy

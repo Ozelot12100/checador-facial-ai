@@ -48,9 +48,11 @@ class AttendanceRecord(Base):
     local_time = Column(DateTime, default=datetime.now)
     
     # 0 = CheckIn, 1 = CheckOut (Mismo enum que en C#)
-    type = Column(Integer, nullable=False) 
+    type = Column(Integer, nullable=False)
     
     # Puntuación de coincidencia (distancia) para auditoría
     match_score = Column(Float, nullable=False)
+    photo_path = Column(String, nullable=True) # Ej: "uploads/abc-123.jpg"
 
     employee = relationship("Employee", back_populates="attendance_records")
+    

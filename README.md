@@ -72,8 +72,14 @@ dlib requiere compilación en Windows. Sigue estos pasos:
 
 ### Iniciar el servidor
 
+**Opción 1 - Usando uvicorn directamente:**
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Opción 2 - Ejecutando main.py:**
+```bash
+python main.py
 ```
 
 El servidor estará disponible en:
@@ -114,11 +120,14 @@ checador_api/
 ├── models.py               # Modelos SQLAlchemy
 ├── schemas.py              # Esquemas Pydantic
 ├── requirements.txt        # Dependencias del proyecto
+├── test_con_fotos.py       # Script de pruebas con fotos
+├── checador_python.db      # Base de datos SQLite (generada automáticamente)
 ├── routers/
 │   ├── employees.py        # Rutas de empleados
 │   └── attendance.py       # Rutas de asistencia
 ├── services/
 │   └── biometric.py        # Servicio de reconocimiento facial
+├── uploads/                # Fotos de empleados (generado automáticamente)
 └── venv/                   # Entorno virtual (no incluido en git)
 ```
 
@@ -147,11 +156,18 @@ Las contribuciones son bienvenidas. Por favor:
 
 ## 📝 Notas de Desarrollo
 
+### Base de Datos
+
+- SQLite para desarrollo local (`checador_python.db`)
+- Las tablas se crean automáticamente al iniciar la aplicación
+- Carpeta `uploads/` se genera automáticamente para almacenar fotos de empleados
+
 ### Sistema de Reconocimiento
 
 - Threshold de similitud: 0.5 (ajustable en `services/biometric.py`)
 - Vectores de 128 dimensiones por rostro
 - Algoritmo: Euclidean distance para comparación
+- Las fotos se guardan en la carpeta `uploads/` con UUID único
 
 ### Lógica de Entrada/Salida
 

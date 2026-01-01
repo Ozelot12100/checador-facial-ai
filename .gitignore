@@ -48,6 +48,7 @@ venv.bak/
 *.sqlite
 *.sqlite3
 checador.db
+checador_python.db
 
 # Environment variables
 .env
@@ -106,6 +107,8 @@ temp_photos/
 *.jpeg
 *.png
 *.gif
+foto_*.jpg
+foto_*.jpeg
 !static/*.jpg
 !static/*.jpeg
 !static/*.png

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 from typing import List
 from datetime import datetime, timedelta
@@ -46,20 +46,51 @@ async def check_in(file: UploadFile = File(...), db: Session = Depends(get_db)):
             time=datetime.now().strftime("%I:%M %p")
         )
 
-    # 4. Lógica de Negocio (Entrada/Salida - 12h)
+    # 4. Lógica de Negocio con validación de cooldown
     last_record = db.query(models.AttendanceRecord)\
         .filter(models.AttendanceRecord.employee_id == employee.id)\
         .order_by(desc(models.AttendanceRecord.timestamp_utc))\
         .first()
 
-    new_type = 0 # CheckIn
+    new_type = 0 # CheckIn por defecto
     
     match_score = BiometricService.calculate_distance(incoming_vector, employee.face_vector)
 
     if last_record:
-        hours_since = (datetime.utcnow() - last_record.timestamp_utc).total_seconds() / 3600
-        if last_record.type == 0 and hours_since < 12:
-            new_type = 1 # CheckOut
+        time_diff = datetime.utcnow() - last_record.timestamp_utc
+        seconds_since = time_diff.total_seconds()
+        minutes_since = seconds_since / 60
+        hours_since = seconds_since / 3600
+        
+        # ⚡ REGLA 1: ANTI-REBOTE (Cooldown Global de 60 segundos)
+        # Si han pasado menos de 60 segundos, NO guardar en BD
+        # Retornar éxito para no confundir al usuario con error rojo
+        if seconds_since < 60:
+            first_name = employee.full_name.split(" ")[0]
+            last_action = "entrada" if last_record.type == 0 else "salida"
+            return schemas.CheckInResponse(
+                success=True,
+                message=f"✓ Ya registraste tu {last_action}, {first_name}",
+                employee_name=employee.full_name,
+                employee_code=employee.code,
+                time=last_record.local_time.strftime("%I:%M %p")
+            )
+        
+        # 🔄 REGLA 2: JORNADA EXTENDIDA (Smart Toggle con 16 horas)
+        # Si último registro fue ENTRADA (type 0)
+        if last_record.type == 0:
+            # Si han pasado menos de 16 horas → SALIDA
+            if hours_since < 16:
+                new_type = 1  # Marcar SALIDA
+            else:
+                # Si han pasado más de 16 horas → Nueva ENTRADA (reseteo de jornada)
+                new_type = 0
+                
+        # Si último registro fue SALIDA (type 1)
+        elif last_record.type == 1:
+            # Siempre será ENTRADA después de una SALIDA
+            # (El cooldown de 60 segundos ya previene duplicados)
+            new_type = 0
 
     # 5. Guardar la FOTO en disco (NUEVO)
     # Generamos un nombre único con UUID para evitar colisiones
@@ -115,7 +146,25 @@ def get_today_records(db: Session = Depends(get_db)):
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = today + timedelta(days=1)
     
-    return db.query(models.AttendanceRecord)\
+    # Usar joinedload para cargar la relación employee en una sola query (optimización)
+    records = db.query(models.AttendanceRecord)\
+        .options(joinedload(models.AttendanceRecord.employee))\
         .filter(models.AttendanceRecord.local_time >= today, models.AttendanceRecord.local_time < tomorrow)\
         .order_by(desc(models.AttendanceRecord.timestamp_utc))\
         .all()
+    
+    # Construir respuesta enriquecida con datos del empleado
+    result = []
+    for record in records:
+        result.append({
+            "id": str(record.id),
+            "timestamp_utc": record.timestamp_utc,
+            "type": record.type,
+            "match_score": record.match_score,
+            "employee_id": str(record.employee_id),
+            "employee_name": record.employee.full_name,
+            "employee_code": record.employee.code,
+            "photo_path": record.photo_path
+        })
+    
+    return result

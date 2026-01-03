@@ -37,6 +37,10 @@ class AttendanceRecordResponse(BaseModel):
     timestamp_utc: datetime
     type: int # 0 o 1
     match_score: float
+    employee_id: str
+    employee_name: str
+    employee_code: str
+    photo_path: Optional[str] = None
 
     class Config:
         from_attributes = True

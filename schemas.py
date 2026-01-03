@@ -15,6 +15,7 @@ class EmployeeResponse(EmployeeBase):
     id: str
     is_active: bool
     created_at_utc: datetime
+    deleted_at: Optional[datetime] = None
     photo_path: Optional[str] = None
 
     class Config:

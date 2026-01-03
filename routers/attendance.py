@@ -142,16 +142,47 @@ def get_history(employee_id: str, db: Session = Depends(get_db)):
         .all()
 
 @router.get("/today", response_model=List[schemas.AttendanceRecordResponse])
-def get_today_records(db: Session = Depends(get_db)):
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow = today + timedelta(days=1)
+def get_today_records(
+    start_date: str = None,
+    end_date: str = None,
+    employee_id: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene registros de asistencia con filtros opcionales.
+    - start_date: formato YYYY-MM-DD (ej: 2026-01-01)
+    - end_date: formato YYYY-MM-DD (ej: 2026-01-05)
+    - employee_id: UUID del empleado para filtrar por empleado específico
+    Si no se proporcionan fechas, retorna solo el día de hoy.
+    """
+    # Si no se especifican fechas, usar día de hoy por defecto
+    if not start_date:
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+    else:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            # Si no hay end_date, usar el mismo día que start_date
+            if end_date:
+                end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+            else:
+                end = start + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Formato de fecha inválido. Usa YYYY-MM-DD (ej: 2026-01-01)"
+            )
     
-    # Usar joinedload para cargar la relación employee en una sola query (optimización)
-    records = db.query(models.AttendanceRecord)\
+    # Construir query con filtros
+    query = db.query(models.AttendanceRecord)\
         .options(joinedload(models.AttendanceRecord.employee))\
-        .filter(models.AttendanceRecord.local_time >= today, models.AttendanceRecord.local_time < tomorrow)\
-        .order_by(desc(models.AttendanceRecord.timestamp_utc))\
-        .all()
+        .filter(models.AttendanceRecord.local_time >= start, models.AttendanceRecord.local_time < end)
+    
+    # Filtrar por empleado si se especifica
+    if employee_id:
+        query = query.filter(models.AttendanceRecord.employee_id == employee_id)
+    
+    records = query.order_by(desc(models.AttendanceRecord.timestamp_utc)).all()
     
     # Construir respuesta enriquecida con datos del empleado
     result = []

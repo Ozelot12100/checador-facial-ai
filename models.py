@@ -20,6 +20,7 @@ class Employee(Base):
     face_vector_json = Column(String, default="[]")
     photo_path = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Fecha de desactivación para auditoría
     created_at_utc = Column(DateTime, default=datetime.utcnow)
 
     # Relación con registros de asistencia

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime
 import uuid
 import os
 from io import BytesIO
@@ -65,15 +66,31 @@ async def create_or_update_employee(
     # Si se proporcionó employee_id, buscar por ID (actualización)
     if employee_id:
         existing_employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
-    else:
-        # Si no hay ID, buscar por código (para evitar duplicados)
-        existing_employee = db.query(models.Employee).filter(models.Employee.code == code).first()
-    
-    if existing_employee:
-        # Si ya existe, actualizamos sus datos
+        
+        if not existing_employee:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontró el empleado con ID {employee_id}"
+            )
+        
+        # Verificar si el código ya existe en otro empleado ACTIVO
+        code_exists = db.query(models.Employee).filter(
+            models.Employee.code == code,
+            models.Employee.id != employee_id,
+            models.Employee.is_active == True  # Solo verificar empleados activos
+        ).first()
+        
+        if code_exists:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El código '{code}' ya está asignado a otro empleado: {code_exists.full_name}"
+            )
+        
+        # Actualizar datos del empleado
         existing_employee.full_name = full_name
-        existing_employee.code = code  # Actualizar el código también
-        existing_employee.is_active = True  # Reactivamos si estaba dado de baja
+        existing_employee.code = code
+        existing_employee.is_active = True
+        existing_employee.deleted_at = None  # Limpiar fecha de eliminación al reactivar
         
         # Solo actualizar foto y vector si se envió una nueva imagen
         if face_vector and photo_url:
@@ -83,6 +100,18 @@ async def create_or_update_employee(
         db.commit()
         db.refresh(existing_employee)
         return existing_employee
+    else:
+        # Modo creación: verificar que el código no exista en empleados ACTIVOS
+        existing_employee = db.query(models.Employee).filter(
+            models.Employee.code == code,
+            models.Employee.is_active == True  # Solo verificar empleados activos
+        ).first()
+        
+        if existing_employee:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El código '{code}' ya está registrado para el empleado: {existing_employee.full_name}"
+            )
 
     # Si es nuevo, validar que se haya enviado foto (obligatoria para crear)
     if file is None:
@@ -110,6 +139,13 @@ def get_all_employees(db: Session = Depends(get_db)):
     # Retorna solo empleados activos
     return db.query(models.Employee).filter(models.Employee.is_active == True).all()
 
+@router.get("/inactive", response_model=List[schemas.EmployeeResponse])
+def get_inactive_employees(db: Session = Depends(get_db)):
+    """Retorna solo empleados desactivados para gestión de reactivación"""
+    return db.query(models.Employee).filter(
+        models.Employee.is_active == False
+    ).order_by(models.Employee.deleted_at.desc()).all()
+
 @router.get("/{employee_id}", response_model=schemas.EmployeeResponse)
 def get_employee(employee_id: str, db: Session = Depends(get_db)):
     employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
@@ -123,7 +159,8 @@ def deactivate_employee(employee_id: str, db: Session = Depends(get_db)):
     if not employee:
         raise HTTPException(status_code=404, detail="Empleado no encontrado")
     
-    # Soft delete (solo desactivar)
+    # Soft delete (solo desactivar y registrar fecha)
     employee.is_active = False
+    employee.deleted_at = datetime.utcnow()
     db.commit()
     return None

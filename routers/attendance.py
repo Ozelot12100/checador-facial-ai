@@ -46,12 +46,37 @@ async def check_in(file: UploadFile = File(...), db: Session = Depends(get_db)):
             time=datetime.now().strftime("%I:%M %p")
         )
 
-    # 4. Lógica de Negocio con validación de cooldown
+    # 4. REGLA PREVIA: Máximo 4 entradas por día
+    # Contar cuántas ENTRADAS (type=0) ha hecho hoy este empleado
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    entries_today = db.query(models.AttendanceRecord)\
+        .filter(
+            models.AttendanceRecord.employee_id == employee.id,
+            models.AttendanceRecord.type == 0,
+            models.AttendanceRecord.local_time >= today_start
+        ).count()
+    
+    # Si ya tiene 4 entradas hoy y el próximo registro sería ENTRADA, rechazar
+    # (Primero verificamos si sería entrada checando el último registro)
     last_record = db.query(models.AttendanceRecord)\
         .filter(models.AttendanceRecord.employee_id == employee.id)\
         .order_by(desc(models.AttendanceRecord.timestamp_utc))\
         .first()
+    
+    # Si no hay registro previo O el último fue SALIDA → próximo sería ENTRADA
+    would_be_entry = (last_record is None) or (last_record.type == 1)
+    
+    if would_be_entry and entries_today >= 4:
+        first_name = employee.full_name.split(" ")[0]
+        return schemas.CheckInResponse(
+            success=False,
+            message=f"❌ Máximo de entradas diarias alcanzado (4), {first_name}",
+            employee_name=employee.full_name,
+            employee_code=employee.code,
+            time=datetime.now().strftime("%I:%M %p")
+        )
 
+    # 5. Lógica de Negocio con validación de cooldown
     new_type = 0 # CheckIn por defecto
     
     match_score = BiometricService.calculate_distance(incoming_vector, employee.face_vector)
@@ -76,14 +101,30 @@ async def check_in(file: UploadFile = File(...), db: Session = Depends(get_db)):
                 time=last_record.local_time.strftime("%I:%M %p")
             )
         
-        # 🔄 REGLA 2: JORNADA EXTENDIDA (Smart Toggle con 16 horas)
+        # 🔄 REGLA 2: GESTIÓN DE TIEMPOS OPERACIONALES
+        # Configuración de intervalos
+        MINIMUM_SHIFT_MINUTES = 10  # Tiempo mínimo para permitir salida (errores, devoluciones)
+        CYCLE_TIMEOUT_HOURS = 18     # Ventana máxima antes de auto-cerrar ciclo
+        
         # Si último registro fue ENTRADA (type 0)
         if last_record.type == 0:
-            # Si han pasado menos de 16 horas → SALIDA
-            if hours_since < 16:
+            # ⏰ VALIDACIÓN 1: Intervalo mínimo de 10 minutos
+            # Permite gestionar: errores de turno, devoluciones por retardo, incidencias
+            if minutes_since < MINIMUM_SHIFT_MINUTES:
+                first_name = employee.full_name.split(" ")[0]
+                minutes_remaining = int(MINIMUM_SHIFT_MINUTES - minutes_since)
+                return schemas.CheckInResponse(
+                    success=False,
+                    message=f"⏱️ Espera {minutes_remaining} min para marcar salida, {first_name}",
+                    employee_name=employee.full_name,
+                    employee_code=employee.code,
+                    time=datetime.now().strftime("%I:%M %p")
+                )
+            elif hours_since < CYCLE_TIMEOUT_HOURS:
+                # ✅ Entre 10 min y 18 horas → PERMITIR SALIDA
                 new_type = 1  # Marcar SALIDA
             else:
-                # Si han pasado más de 16 horas → Nueva ENTRADA (reseteo de jornada)
+                # 🔄 Más de 18 horas sin cerrar ciclo → Auto-cierre y Nueva ENTRADA
                 new_type = 0
                 
         # Si último registro fue SALIDA (type 1)
@@ -92,7 +133,7 @@ async def check_in(file: UploadFile = File(...), db: Session = Depends(get_db)):
             # (El cooldown de 60 segundos ya previene duplicados)
             new_type = 0
 
-    # 5. Guardar la FOTO en disco (NUEVO)
+    # 6. Guardar la FOTO en disco (NUEVO)
     # Generamos un nombre único con UUID para evitar colisiones
     filename = f"{uuid.uuid4()}.jpg"
     
